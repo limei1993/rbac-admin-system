@@ -3,7 +3,7 @@ const bcrypt = require('bcryptjs')
 const Admin = require('../models/admin')
 const Role = require('../models/role')
 const UserRole = require('../models/userRole')
-const { JWT_SECRET, JWT_EXPIRES } = require('../config/jwt')
+const { JWT_SECRET, JWT_EXPIRES, JWT_ISSUER } = require('../config/jwt')
 const { success } = require('../utils/response');
 const AppError = require('../utils/AppError');
 
@@ -38,13 +38,17 @@ const login = async (ctx) => {
     // 兼容单角色场景：取第一个角色名，没绑角色时默认普通用户
     const roleName = roles[0] || 'user'
 
-    // 签发 token: payload 里放用户身份，服务端不存session
-    // 注意：payload 里的 role 只是登录那一刻的快照，
-    //       真正的权限判定（rbac 中间件）一律实时查库，不信这个字段
+    // 签发 token: payload 里【只放身份】，不放角色
+    // 为什么不放角色：
+    //   1. JWT 是自包含的，payload 只是 Base64 编码（不是加密），任何人都能解出来看
+    //   2. 角色一旦写进去就固化成「登录那一刻的快照」，
+    //      管理员改完权限它不会自动更新 —— 这正是早期版本的真实越权漏洞
+    //   3. 真正的权限判定一律实时查库（见 middleware/rbac.js）
+    // 前端要展示角色，走响应体 / GET /profile 拿实时值，不解析 token
     const token = jwt.sign(
-        { id: admin.id, username: admin.username, role: roleName, roles },
+        { id: admin.id, username: admin.username },
         JWT_SECRET,
-        { expiresIn: JWT_EXPIRES }
+        { expiresIn: JWT_EXPIRES, issuer: JWT_ISSUER }
     )
    success(ctx, {
        token,

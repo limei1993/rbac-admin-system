@@ -3,7 +3,7 @@ const bcrypt = require('bcryptjs')
 const Admin = require('../models/admin')
 const Role = require('../models/role')
 const UserRole = require('../models/userRole')
-const { JWT_SECRET, JWT_EXPIRES } = require('../config/jwt')
+const { JWT_SECRET, JWT_EXPIRES, JWT_ISSUER } = require('../config/jwt')
 const { success } = require('../utils/response')
 const AppError = require('../utils/AppError')
 
@@ -69,10 +69,11 @@ const register = async (ctx) => {
     })
 
     // 5.签发token（注册即登录，省的用户再回登录页输一遍）
+    // payload 只放身份，角色不入 token（和 login.js 保持同一口径，理由见那里）
     const token = jwt.sign(
-        { id: account.id, username: account.username, role: userRole.name },
+        { id: account.id, username: account.username },
         JWT_SECRET,
-        { expiresIn: JWT_EXPIRES }
+        { expiresIn: JWT_EXPIRES, issuer: JWT_ISSUER }
     )
 
     success(ctx, {

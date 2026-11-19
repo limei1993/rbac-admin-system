@@ -38,6 +38,11 @@ export const useUserStore = defineStore('user', () => {
     //        （后端 rbac 中间件是实时查库的，前端必须跟同一套口径）
     const role = ref(localStorage.getItem('role') || '')
     const roles = ref(readStoredRoles())
+    // 实时角色是否已加载成功（和菜单的 loaded 一个套路）
+    // 单独标记是为了让路由守卫能判断「菜单拿到了但角色没拿到」这种情况，
+    // 从而触发重试，而不是因为菜单已加载就整体跳过
+    const rolesLoaded = ref(false)
+    const rolesLoading = ref(false)
 
     // 持久化角色数组
     const persistRoles = (list) => {
@@ -69,11 +74,22 @@ export const useUserStore = defineStore('user', () => {
     }
 
     // 刷新实时角色：管理员改完权限后，用户刷新页面即可生效
-    const loadRoles = async () => {
-        const res = await getProfile()
-        const list = res.data?.roles || []
-        persistRoles(list)
-        return list
+    // 失败时【不】置 rolesLoaded —— 保持 false，路由守卫下次会再拉一次，
+    // 避免「一次网络抖动导致整个会话里管理员按钮永久消失」
+    const loadRoles = async (force = false) => {
+        if (rolesLoaded.value && !force) return roles.value
+        if (rolesLoading.value) return roles.value
+
+        rolesLoading.value = true
+        try {
+            const res = await getProfile()
+            const list = res.data?.roles || []
+            persistRoles(list)
+            rolesLoaded.value = true
+            return list
+        } finally {
+            rolesLoading.value = false
+        }
     }
 
     // 退出登录
@@ -82,6 +98,8 @@ export const useUserStore = defineStore('user', () => {
         username.value = ''
         role.value = ''
         roles.value = []
+        rolesLoaded.value = false
+        rolesLoading.value = false
         localStorage.removeItem('token')
         localStorage.removeItem('username')
         localStorage.removeItem('role')
@@ -98,6 +116,7 @@ export const useUserStore = defineStore('user', () => {
         username,
         role,
         roles,
+        rolesLoaded,
         isAdmin,
         setLogin,
         loadRoles,
