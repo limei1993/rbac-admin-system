@@ -45,3 +45,13 @@ export const updateUser = (data) => {
 export const deleteUser = (id) => {
   return request.delete(`/users/${id}`)
 }
+
+/**
+ * 获取当前登录账号的实时身份与角色
+ *
+ * 后端 rbac 中间件是实时查库的，所以前端也必须拿实时角色，
+ * 否则会出现「后端已经 403，前端还把按钮亮着」的割裂。
+ */
+export const getProfile = () => {
+  return request.get('/profile')
+}

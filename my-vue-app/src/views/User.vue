@@ -8,8 +8,11 @@
       </template>
 
       <!-- 操作栏：新增 + 搜索 -->
+      <!-- 新增 / 编辑 / 删除都是管理员专属操作：
+           前端隐藏按钮只是展示层优化，
+           真正的权限边界在后端 rbac 中间件，普通用户直接调接口会返回 403 -->
       <div class="toolbar">
-        <el-button type="primary" :icon="Plus" @click="openAdd">新增</el-button>
+        <el-button v-if="userStore.isAdmin" type="primary" :icon="Plus" @click="openAdd">新增</el-button>
         <div class="search">
           <el-input
             v-model="searchName"
@@ -33,7 +36,7 @@
         <el-table-column prop="addr" label="地址" min-width="220" />
         <el-table-column label="操作" width="180" fixed="right">
           <template #default="{ row }">
-            <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
+            <el-button v-if="userStore.isAdmin" link type="primary" @click="openEdit(row)">编辑</el-button>
             <!-- 删除是管理员专属操作：前端隐藏按钮只是展示层优化，
                  真正的权限边界在后端 rbac 中间件，普通用户直接调接口会返回 403 -->
             <el-button v-if="userStore.isAdmin" link type="danger" @click="handleDelete(row)">删除</el-button>
@@ -232,7 +235,9 @@ const handleDelete = (row) => {
 .toolbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  // 靠右排：普通用户没有「新增」按钮时，搜索框不会孤零零贴在左边
+  justify-content: flex-end;
+  gap: 12px;
   margin-bottom: 16px;
 }
 

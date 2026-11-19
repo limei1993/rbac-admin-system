@@ -96,6 +96,7 @@ request.interceptors.response.use(
         localStorage.removeItem('token')
         localStorage.removeItem('username')
         localStorage.removeItem('role')
+        localStorage.removeItem('roles')
         const redirect = window.location.hash.replace(/^#/, '')
         if (!redirect.startsWith('/login')) {
           window.location.hash = `/login?redirect=${encodeURIComponent(redirect)}`

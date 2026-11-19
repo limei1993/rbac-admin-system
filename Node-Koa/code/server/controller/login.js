@@ -26,18 +26,23 @@ const login = async (ctx) => {
         throw new AppError('用户名或密码错误', 401, 10002);
     }
 
-    // 1. 查出这个用户绑定的角色
-    const userRole = await UserRole.findOne({ where: { userId: admin.id } })
-    let roleName = 'user' // 默认普通用户
-    if (userRole) {
-        const roleData = await Role.findByPk(userRole.roleId)
-        if (roleData) roleName = roleData.name
+    // 1. 查出这个用户绑定的角色（支持多角色，取并集）
+    //    和菜单模块（controller/menu.js）保持同一套口径：角色实时查库
+    const links = await UserRole.findAll({ where: { userId: admin.id } })
+    const roleIds = links.map(l => l.roleId)
+    let roles = []
+    if (roleIds.length) {
+        const rows = await Role.findAll({ where: { id: roleIds } })
+        roles = rows.map(r => r.name)
     }
-    
+    // 兼容单角色场景：取第一个角色名，没绑角色时默认普通用户
+    const roleName = roles[0] || 'user'
 
     // 签发 token: payload 里放用户身份，服务端不存session
+    // 注意：payload 里的 role 只是登录那一刻的快照，
+    //       真正的权限判定（rbac 中间件）一律实时查库，不信这个字段
     const token = jwt.sign(
-        { id: admin.id, username: admin.username, role: roleName },
+        { id: admin.id, username: admin.username, role: roleName, roles },
         JWT_SECRET,
         { expiresIn: JWT_EXPIRES }
     )
@@ -45,7 +50,8 @@ const login = async (ctx) => {
        token,
        username: admin.username,
        nickname: admin.nickname,
-       role: roleName
+       role: roleName,
+       roles
    }, '登录成功');
 }
 

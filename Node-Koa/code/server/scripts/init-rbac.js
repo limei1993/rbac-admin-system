@@ -12,8 +12,8 @@ const Admin = require('../models/admin')
 const run = async () => {
     // 1. 创建角色（已存在则跳过）
     const roleList = [
-        { name: 'admin', description: '超级管理员：可删除用户' },
-        { name: 'user', description: '普通用户：只能查看和新增' }
+        { name: 'admin', description: '超级管理员：可增删改用户、配置菜单与角色授权' },
+        { name: 'user', description: '普通用户：只能查看用户列表，不能增删改' }
     ]
 
     for (const r of roleList) {

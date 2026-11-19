@@ -61,11 +61,17 @@ router.prefix('/users')
  *       200:
  *         description: 成功
  */
+// 列表：登录即可读
+// （能不能「看到」这个页面由前端菜单权限控制，后端负责的是「能不能改」）
 router.get('/', auth, User.listAll)
-router.post('/', auth, validate(createSchema), User.create)
+
+// 写操作（新增 / 修改 / 删除）一律要求 admin 角色：
+//   - rbac 中间件放在 validate 之前，先鉴权再校验参数，
+//     避免无权限的人通过参数报错信息探测接口细节
+//   - rbac 内部实时查库，管理员把用户降权后，旧 token 立刻失去写权限
+router.post('/', auth, rbac(['admin']), validate(createSchema), User.create)
 // 注意这里变成了 /:id，说明 id 是路径的一部分
-router.put('/:id', auth, validate(updateSchema), User.update)
-// 删除用户：必须是登录状态（auth），并且角色是 admin（rbac）
+router.put('/:id', auth, rbac(['admin']), validate(updateSchema), User.update)
 router.delete('/:id', auth, rbac(['admin']), User.remove)
 
 module.exports = router

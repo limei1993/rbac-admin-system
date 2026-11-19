@@ -1,6 +1,19 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { getUserMenus } from '@/api/menu'
+import { getProfile } from '@/api/user'
+// 从 localStorage 读回角色数组（存的是 JSON 字符串）
+// 容错：数据被手改坏时返回空数组，不能让整个应用白屏
+const readStoredRoles = () => {
+    try {
+        const raw = localStorage.getItem('roles')
+        const parsed = raw ? JSON.parse(raw) : []
+        return Array.isArray(parsed) ? parsed : []
+    } catch (e) {
+        return []
+    }
+}
+
 function initState() {
     return {
         // 侧边栏是否折叠。
@@ -18,50 +31,78 @@ export const useAllDataStore = defineStore('allData', () => {
 
 // 登录态：token、用户名、角色持久化到 localStorage，刷新页面不丢失
 export const useUserStore = defineStore('user', () => {
-  const token = ref(localStorage.getItem('token') || '')
-  const username = ref(localStorage.getItem('username') || '')
-  // 角色来自后端下发的 JWT payload，用于前端做菜单/按钮级别的展示控制
-  const role = ref(localStorage.getItem('role') || '')
+    const token = ref(localStorage.getItem('token') || '')
+    const username = ref(localStorage.getItem('username') || '')
+    // role  : 登录那一刻的角色快照（单个），只做展示兼容用
+    // roles : 实时角色数组，权限判断一律以它为准
+    //        （后端 rbac 中间件是实时查库的，前端必须跟同一套口径）
+    const role = ref(localStorage.getItem('role') || '')
+    const roles = ref(readStoredRoles())
 
-  // 保存登录态
-  const setLogin = (newToken, newUsername, newRole) => {
-    token.value = newToken || ''
-    username.value = newUsername || ''
-    role.value = newRole || ''
-    if (newToken) {
-      localStorage.setItem('token', newToken)
-      localStorage.setItem('username', newUsername || '')
-      if (newRole) {
-        localStorage.setItem('role', newRole)
-      } else {
-        // 老登录接口可能没返回 role，避免残留上一个账号的角色
-        localStorage.removeItem('role')
-      }
+    // 持久化角色数组
+    const persistRoles = (list) => {
+        roles.value = Array.isArray(list) ? list : []
+        if (roles.value.length) {
+            localStorage.setItem('roles', JSON.stringify(roles.value))
+        } else {
+            localStorage.removeItem('roles')
+        }
     }
-  }
 
-  // 退出登录
-  const logout = () => {
-    token.value = ''
-    username.value = ''
-    role.value = ''
-    localStorage.removeItem('token')
-    localStorage.removeItem('username')
-    localStorage.removeItem('role')
-  }
+    // 保存登录态
+    const setLogin = (newToken, newUsername, newRole, newRoles) => {
+        token.value = newToken || ''
+        username.value = newUsername || ''
+        role.value = newRole || ''
+        // 后端登录接口现在会返回 roles 数组；老接口没返回时用单个 role 兜底
+        persistRoles(newRoles || (newRole ? [newRole] : []))
+        if (newToken) {
+            localStorage.setItem('token', newToken)
+            localStorage.setItem('username', newUsername || '')
+            if (newRole) {
+                localStorage.setItem('role', newRole)
+            } else {
+                // 老登录接口可能没返回 role，避免残留上一个账号的角色
+                localStorage.removeItem('role')
+            }
+        }
+    }
 
-  // 是否管理员：用于前端隐藏「删除」等管理员专属按钮
-  // 注意：真正的权限边界在后端 rbac 中间件，前端只是展示层优化
-  const isAdmin = computed(() => role.value === 'admin')
+    // 刷新实时角色：管理员改完权限后，用户刷新页面即可生效
+    const loadRoles = async () => {
+        const res = await getProfile()
+        const list = res.data?.roles || []
+        persistRoles(list)
+        return list
+    }
 
-  return {
-      token,
-      username,
-      role,
-      isAdmin,
-      setLogin,
-      logout
-  }
+    // 退出登录
+    const logout = () => {
+        token.value = ''
+        username.value = ''
+        role.value = ''
+        roles.value = []
+        localStorage.removeItem('token')
+        localStorage.removeItem('username')
+        localStorage.removeItem('role')
+        localStorage.removeItem('roles')
+    }
+
+    // 是否管理员：只看实时角色数组
+    // 刻意不拿 role 快照兜底 —— 快照是登录那一刻的，
+    // 管理员降权后快照不会变，用它判断会导致降权不生效
+    const isAdmin = computed(() => roles.value.includes('admin'))
+
+    return {
+        token,
+        username,
+        role,
+        roles,
+        isAdmin,
+        setLogin,
+        loadRoles,
+        logout
+    }
   })
 
   /**

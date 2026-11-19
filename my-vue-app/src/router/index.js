@@ -1,5 +1,5 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
-import { useMenuStore } from '@/stores'
+import { useMenuStore, useUserStore } from '@/stores'
 import { routes } from './routes'
 
 // 路由表定义在 ./routes.js，菜单管理页也会用它生成「菜单路径」下拉选项
@@ -37,14 +37,22 @@ router.beforeEach(async (to) => {
   // ===== 菜单权限校验 =====
   // 菜单由后端按当前用户的角色下发，这里判断「这个路径在不在我的菜单里」
   const menuStore = useMenuStore()
+  // 用户角色：决定页面里哪些操作按钮该亮着
+  const userStore = useUserStore()
 
-  // 第一次进来（或刚换了账号）时拉一次菜单，之后走缓存
+  // 第一次进来（或刚换了账号）时拉一次菜单 + 实时角色，之后走缓存
+  // 两个接口并行：菜单决定「能进哪些页面」，角色决定「能操作哪些按钮」
+  // 刷新页面时 store 会重置 → 这里必然重新拉，
+  // 所以管理员改完权限，用户刷新一下就立刻生效，不用重新登录
   if (!menuStore.loaded) {
     try {
-      await menuStore.loadMenus()
+      await Promise.all([
+        menuStore.loadMenus(),
+        userStore.loadRoles()
+      ])
     } catch (e) {
-      // 菜单拉取失败不阻塞跳转，侧边栏会显示「加载失败 + 重试」
-      console.warn('菜单加载失败：', e.message)
+      // 加载失败不阻塞跳转，侧边栏会显示「加载失败 + 重试」
+      console.warn('菜单/角色加载失败：', e.message)
     }
   }
 

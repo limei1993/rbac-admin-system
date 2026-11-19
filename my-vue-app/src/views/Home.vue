@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, onBeforeUnmount } from 'vue'
+import { onMounted, onBeforeUnmount, computed } from 'vue'
 import * as echarts from 'echarts/core'
 import { LineChart, BarChart, PieChart } from 'echarts/charts'
 import {
@@ -9,6 +9,7 @@ import {
   GridComponent
 } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
+import { useUserStore } from '@/stores'
 
 // 按需注册 echarts 模块，减小打包体积
 echarts.use([
@@ -23,6 +24,20 @@ echarts.use([
 ])
 
 /* ---------------- 数据 ---------------- */
+
+// 登录态：用户名与角色都取自 store
+const userStore = useUserStore()
+
+// 角色文案：按实时角色显示，不再硬编码「超级管理员」
+// （之前不管谁登录都显示「超级管理员」，普通用户看到的是错的）
+const roleText = computed(() => {
+  if (userStore.isAdmin) return '超级管理员'
+  if (userStore.roles.length) return userStore.roles.join(' / ')
+  return '普通用户'
+})
+
+// 头像文字：取用户名首字母
+const avatarText = computed(() => (userStore.username || 'A').charAt(0).toUpperCase())
 
 // 顶部统计卡片
 const statCards = [
@@ -167,10 +182,10 @@ onBeforeUnmount(() => {
     <div class="home-left">
       <!-- 用户信息 -->
       <div class="card user-card">
-        <el-avatar :size="60" src="" class="user-avatar">A</el-avatar>
+        <el-avatar :size="60" src="" class="user-avatar">{{ avatarText }}</el-avatar>
         <div class="user-text">
-          <div class="user-name">Admin</div>
-          <div class="user-role">超级管理员</div>
+          <div class="user-name">{{ userStore.username || 'Admin' }}</div>
+          <div class="user-role">{{ roleText }}</div>
         </div>
       </div>
 

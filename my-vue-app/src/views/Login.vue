@@ -92,7 +92,13 @@ const handleLogin = async () => {
     const res = await login({ username: form.username, password: form.password })
 
     // 保存登录态（token / 用户名 / 角色）
-    userStore.setLogin(res.data?.token, res.data?.username || form.username, res.data?.role)
+    // 后端返回的 roles 是实时查库后的角色数组，按钮权限以它为准
+    userStore.setLogin(
+      res.data?.token,
+      res.data?.username || form.username,
+      res.data?.role,
+      res.data?.roles
+    )
 
     // 清掉上一个账号残留的菜单缓存（换了账号，能看到的菜单可能不一样）
     menuStore.resetMenus()

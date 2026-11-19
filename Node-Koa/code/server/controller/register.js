@@ -79,7 +79,8 @@ const register = async (ctx) => {
         token,
         username: account.username,
         nickname: account.nickname,
-        role: userRole.name
+        role: userRole.name,
+        roles: [userRole.name]
     }, '注册成功')
 }
 
