@@ -224,7 +224,8 @@ export DB_PASSWORD=your-password
 npm run dev          # nodemon 热重载，端口 3000
 ```
 
-表结构在首次启动时由 Sequelize 自动创建。
+表结构在首次启动时由 Sequelize 自动创建：启动脚本会**先 `sync()` 同步表结构、再监听端口**，
+同步失败直接退出，不带病启动（避免请求早于建表到达，报 `table doesn't exist`）。
 
 ### 3. 初始化基础数据
 
@@ -256,6 +257,18 @@ npm run dev          # Vite dev server，端口 5174，/api 已代理到 3000
 ```
 
 访问 <http://localhost:5174>，接口文档见 <http://localhost:3000/swagger>。
+
+### 5. 运行测试
+
+```bash
+cd Node-Koa/code/server
+npx jest
+```
+
+覆盖登录、鉴权拦截、JWT payload 只含身份、issuer 校验、权限码下发、
+按钮权限不混入菜单树、无权限账号写接口 403、账号删除后旧 Token 立即失效（共 9 条）。
+
+> 测试连的是真实数据库，用例中临时创建的账号会在跑完后自动删除。
 
 ### 测试账号
 
@@ -293,12 +306,14 @@ npm run dev          # Vite dev server，端口 5174，/api 已代理到 3000
 
 - [x] **权限粒度**：已落地按钮级权限码体系（`sys:user:create` / `sys:menu:delete` 等），
       接口鉴权不再只到「角色能否访问」，可以表达「能看不能改」
-- [ ] **权限码全覆盖**：目前只有用户管理、菜单管理、角色授权三组接口接了权限码，
-      其余写接口仍是「登录即可」，待按同一套规范补齐
+- [x] **权限码全覆盖**：所有【写操作】接口都已接入权限码 ——
+      用户管理 `sys:user:create / update / delete`、菜单管理 `sys:menu:create / update / delete`、
+      角色授权 `sys:role:assign`；
+      `GET /profile`、`GET /permissions` 属于「查询自己的信息」，只需登录态，不设操作级门槛
 - [ ] **强制失效**：账号被删除后其 Token 已能立即失效（`auth` 中间件实时查账号），
       但 Token 本身在有效期内仍无法主动失效 —— 用户点「退出登录」后，只要 Token 没过期理论上仍可被重放。
       待引入 token 版本号或黑名单
-- [ ] **测试**：已接入 Jest + Supertest，待补齐权限矩阵回归用例
+- [x] **测试**：Jest + Supertest 已接入，权限矩阵回归用例补齐（9 条，见上方「运行测试」）
 - [x] **数据迁移**：已引入 `scripts/migrate-perm.js` 管理表结构演进（补列 + 种子数据），
       后续字段变更按同一模式追加
 - [ ] **操作审计**：权限变更等高危动作尚未落审计日志
