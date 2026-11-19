@@ -35,16 +35,23 @@ const listAll = async (ctx) => {
 const create = async (ctx) => {
     const params = ctx.request.body || {};
 
-    await User.create(params);
+    const user = await User.create(params);
 
-    success(ctx, "创建成功")
+    // 返回新记录的 id：调用方（如前端列表页）可以据此定位刚创建的记录，
+    // 不必为了拿 id 再查一次列表
+    success(ctx, { id: user.id }, "创建成功")
 };
 
 // 编辑用户
 // POST /users/edit  { id, name, age, sexlabel, birth, addr }
 const update = async (ctx) => {
     // 从 URL 路径里拿 id (ctx.params)
-    const id = Number(ctx.params.id);  
+    const id = Number(ctx.params.id);
+    // id 非法时直接 400，不要把 NaN 丢给数据库（那会变成 500 内部错误，
+    // 调用方看不出是自己传错了参数）
+    if (!Number.isInteger(id)) {
+        throw new AppError('用户 id 不合法', 400, 10002);
+    }
     // Body 里只拿需要修改的字段
     const fields = ctx.request.body;
 
@@ -53,20 +60,25 @@ const update = async (ctx) => {
         throw new AppError('用户不存在', 404, 10002);
     }
 
-   success(ctx, '修改成功');
+    success(ctx, '修改成功');
 };
 
 // 删除用户
 // GET /users/delete?id=1
 const remove = async (ctx) => {
     // 从 URL 路径里拿 id
-    const id = Number(ctx.params.id);  
-   
+    const id = Number(ctx.params.id);
+
+    // 同上：id 非法直接 400，不要让 NaN 变成 500
+    if (!Number.isInteger(id)) {
+        throw new AppError('用户 id 不合法', 400, 10002);
+    }
+
     const deleted = await User.destroy({ where: { id } });
     if (!deleted) {
         throw new AppError('用户不存在', 404, 10002);
     }
-    
+
     success(ctx, '删除成功');
 };
 

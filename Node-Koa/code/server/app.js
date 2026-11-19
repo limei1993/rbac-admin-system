@@ -10,7 +10,8 @@ const index = require('./routes/index')
 const users = require('./routes/users')
 const login = require('./routes/login')
 const menus = require('./routes/menus')
-const profile = require('./routes/profile')  
+const profile = require('./routes/profile')
+const permissions = require('./routes/permissions')  
 require('./config/db')
 const log = require('./utils/log4js')
 // 在 app.js 顶部引入依赖
@@ -51,7 +52,8 @@ app.use(index.routes(), index.allowedMethods())
 app.use(users.routes(), users.allowedMethods())
 app.use(login.routes(), login.allowedMethods())
 app.use(menus.routes(), menus.allowedMethods())
-app.use(profile.routes(), profile.allowedMethods()) 
+app.use(profile.routes(), profile.allowedMethods())
+app.use(permissions.routes(), permissions.allowedMethods()) 
 
 // 1. 配置 Swagger 的基础信息
 const swaggerSpec = swaggerJSDoc({

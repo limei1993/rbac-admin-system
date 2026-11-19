@@ -45,20 +45,21 @@ router.beforeEach(async (to) => {
   // 刷新页面时 store 会重置 → 这里必然重新拉，
   // 所以管理员改完权限，用户刷新一下就立刻生效，不用重新登录
   //
-  // 判据是【或】不是【与】：菜单和角色是两个独立的 store。
+  // 判据是【或】不是【与】：菜单、角色、权限码是三个独立的 store。
   // 之前只判断 menuStore.loaded，一旦 loadRoles 单独失败（比如 /profile 500），
   // menuStore.loaded 已经被置为 true，之后所有导航都会跳过这一段，
   // isAdmin 永远是 false（后端照常放行，但界面和后端割裂），只能靠手动刷新页面恢复。
   // 现在任意一项没加载成功都会重新拉，没成功的那项自然被重试。
-  if (!menuStore.loaded || !userStore.rolesLoaded) {
+  if (!menuStore.loaded || !userStore.rolesLoaded || !userStore.permsLoaded) {
     try {
       await Promise.all([
         menuStore.loadMenus(),
-        userStore.loadRoles()
+        userStore.loadRoles(),
+        userStore.loadPerms()
       ])
     } catch (e) {
       // 加载失败不阻塞跳转，侧边栏会显示「加载失败 + 重试」
-      console.warn('菜单/角色加载失败：', e.message)
+      console.warn('菜单/角色/权限加载失败：', e.message)
     }
   }
 

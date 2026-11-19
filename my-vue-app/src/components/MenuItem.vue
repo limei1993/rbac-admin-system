@@ -1,6 +1,15 @@
 <template>
+  <!--
+    目录类型：只做分组，标题本身不可点击，子菜单缩进显示。
+    用 el-menu-item-group 而不是 el-sub-menu —— el-sub-menu 的标题是可点击的，
+    而目录不应该有自己的路由。
+  -->
+  <el-menu-item-group v-if="isDirectory" :title="item.name">
+    <MenuItem v-for="child in item.children" :key="child.id" :item="child" />
+  </el-menu-item-group>
+
   <!-- 有子菜单 → 渲染成可展开的子菜单 -->
-  <el-sub-menu v-if="hasChildren" :index="subIndex">
+  <el-sub-menu v-else-if="hasChildren" :index="subIndex">
     <template #title>
       <el-icon class="icons"><component :is="item.icon" /></el-icon>
       <span>{{ item.name }}</span>
@@ -31,6 +40,9 @@ const props = defineProps({
   // 一条菜单数据，结构由后端 /menus 接口下发
   item: { type: Object, required: true }
 })
+
+// 目录类型：只做分组用
+const isDirectory = computed(() => props.item.type === 'directory')
 
 // 有没有子菜单
 const hasChildren = computed(

@@ -2,11 +2,25 @@ import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { getUserMenus } from '@/api/menu'
 import { getProfile } from '@/api/user'
+import { getPermissions } from '@/api/permission'
 // 从 localStorage 读回角色数组（存的是 JSON 字符串）
 // 容错：数据被手改坏时返回空数组，不能让整个应用白屏
 const readStoredRoles = () => {
     try {
         const raw = localStorage.getItem('roles')
+        const parsed = raw ? JSON.parse(raw) : []
+        return Array.isArray(parsed) ? parsed : []
+    } catch (e) {
+        return []
+    }
+}
+
+// 权限码同样从 localStorage 读一份缓存：
+//   作用是「刷新页面时按钮立刻显示」，不用等 /permissions 请求回来再显示，避免闪烁。
+//   真正的权威值仍然来自 loadPerms() 的实时查询，缓存只是首屏兜底。
+const readStoredPerms = () => {
+    try {
+        const raw = localStorage.getItem('perms')
         const parsed = raw ? JSON.parse(raw) : []
         return Array.isArray(parsed) ? parsed : []
     } catch (e) {
@@ -43,6 +57,11 @@ export const useUserStore = defineStore('user', () => {
     // 从而触发重试，而不是因为菜单已加载就整体跳过
     const rolesLoaded = ref(false)
     const rolesLoading = ref(false)
+    // 权限码：细粒度权限（如 sys:user:create），按钮显隐完全以它为准
+    // 和 roles 一样是「实时」的 —— 管理员在角色授权页勾掉按钮，用户刷新即生效
+    const perms = ref(readStoredPerms())
+    const permsLoaded = ref(false)
+    const permsLoading = ref(false)
 
     // 持久化角色数组
     const persistRoles = (list) => {
@@ -92,6 +111,46 @@ export const useUserStore = defineStore('user', () => {
         }
     }
 
+    // 刷新实时权限码：管理员在「角色授权」页改完按钮权限，用户刷新页面即可生效
+    // 失败时【不】置 permsLoaded —— 保持 false，路由守卫下次会再拉一次，
+    // 避免「一次网络抖动导致整个会话里按钮永久消失」
+    const loadPerms = async (force = false) => {
+        if (permsLoaded.value && !force) return perms.value
+        if (permsLoading.value) return perms.value
+
+        permsLoading.value = true
+        try {
+            const res = await getPermissions()
+            const list = Array.isArray(res.data) ? res.data : []
+            perms.value = list
+            if (list.length) {
+                localStorage.setItem('perms', JSON.stringify(list))
+            } else {
+                localStorage.removeItem('perms')
+            }
+            permsLoaded.value = true
+            return list
+        } finally {
+            permsLoading.value = false
+        }
+    }
+
+    // 是否拥有某个权限码
+    // 数组形式是「命中任意一个即通过」（OR）
+    // 支持通配：'sys:user:*' 匹配 sys:user:create / sys:user:update 等
+    const hasPerm = (code) => {
+        if (!code) return true
+        const list = Array.isArray(code) ? code : [code]
+        return list.some((c) => {
+            if (perms.value.includes(c)) return true
+            if (typeof c === 'string' && c.endsWith('*')) {
+                const prefix = c.slice(0, -1)
+                return perms.value.some((p) => p.startsWith(prefix))
+            }
+            return false
+        })
+    }
+
     // 退出登录
     const logout = () => {
         token.value = ''
@@ -100,10 +159,14 @@ export const useUserStore = defineStore('user', () => {
         roles.value = []
         rolesLoaded.value = false
         rolesLoading.value = false
+        perms.value = []
+        permsLoaded.value = false
+        permsLoading.value = false
         localStorage.removeItem('token')
         localStorage.removeItem('username')
         localStorage.removeItem('role')
         localStorage.removeItem('roles')
+        localStorage.removeItem('perms')
     }
 
     // 是否管理员：只看实时角色数组
@@ -117,9 +180,13 @@ export const useUserStore = defineStore('user', () => {
         role,
         roles,
         rolesLoaded,
+        perms,
+        permsLoaded,
         isAdmin,
+        hasPerm,
         setLogin,
         loadRoles,
+        loadPerms,
         logout
     }
   })

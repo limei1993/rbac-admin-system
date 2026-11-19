@@ -21,10 +21,11 @@
 ## 功能一览
 
 - **认证**：注册、登录、登出；JWT 无状态签发，密码 bcrypt 哈希存储
-- **权限管理**：菜单管理（树形增删改查）、角色授权（勾选式分配菜单）
+- **权限管理**：菜单管理（目录 / 菜单 / 按钮三级）、角色授权（勾选式分配菜单与按钮权限）
 - **用户管理**：列表分页、搜索、新增、编辑、删除
-- **前端权限**：菜单动态下发渲染侧边栏、路由守卫按路径白名单校验、按钮级显隐
-- **实时鉴权**：角色变更后刷新即生效，旧 Token 不残留越权窗口
+- **前端权限**：菜单动态下发渲染侧边栏、路由守卫按路径白名单校验、`v-perm` 指令按权限码控制按钮显隐
+- **两级鉴权**：`rbac` 守页面级门槛（谁能进管理页），`perm` 守操作级门槛（谁能新增 / 编辑 / 删除）
+- **实时鉴权**：角色与按钮权限变更后刷新即生效，旧 Token 不残留越权窗口
 - **接口文档**：Swagger UI，可在线调试并携带 Token
 
 ---
@@ -35,10 +36,11 @@
 .
 ├── my-vue-app/                     # 前端（Vue3 + Vite）
 │   ├── src/
-│   │   ├── api/                    # 接口封装（login / register / user / menu）
+│   │   ├── api/                    # 接口封装（login / register / user / menu / permission）
 │   │   ├── components/             # 公共组件（侧边栏、顶栏）
+│   │   ├── directives/perm.js      # v-perm 指令：按权限码控制按钮显隐
 │   │   ├── router/                 # 静态路由表 + 路由守卫
-│   │   ├── stores/                 # Pinia：登录态、菜单树
+│   │   ├── stores/                 # Pinia：登录态、菜单树、实时角色与权限码
 │   │   ├── utils/request.js        # axios 封装（统一错误处理、401 跳登录）
 │   │   └── views/                  # 页面（登录/注册/首页/用户/菜单/授权）
 │   └── vite.config.js              # dev server + /api 代理
@@ -46,11 +48,11 @@
     ├── bin/www                     # 启动入口
     ├── config/                     # 数据库、JWT 配置
     ├── controller/                 # 业务控制器
-    ├── middleware/                 # auth / rbac / validate / error
+    ├── middleware/                 # auth / rbac / perm / validate / error
     ├── models/                     # Sequelize 模型与关联
     ├── routes/                     # 路由定义
-    ├── scripts/                    # 幂等初始化脚本
-    ├── utils/                      # 响应封装、AppError、日志、鉴权
+    ├── scripts/                    # 幂等初始化脚本 + 迁移脚本
+    ├── utils/                      # 响应封装、AppError、日志、鉴权、权限查询
     └── app.js                      # 中间件装配
 ```
 
@@ -73,7 +75,7 @@
 | --- | --- |
 | `admin` | 登录账号，密码存 bcrypt 哈希 |
 | `role` | 角色（admin / user） |
-| `menu` | 菜单树，`parentId` 自关联，`visible` 控制整棵子树隐藏 |
+| `menu` | 菜单树，`parentId` 自关联，`visible` 控制整棵子树隐藏，`type` 区分目录/菜单/按钮，`perm` 存权限标识 |
 | `user_role` | 账号与角色的多对多关联 |
 | `role_menu` | 角色与菜单的多对多关联，**联合唯一索引**防重复授权 |
 | `user` | 业务用户数据（与登录账号分离） |
@@ -83,15 +85,25 @@
 ```
 登录  →  后端签发 JWT（payload 只含 id / username / iss，【不含角色】）
          ↓
-前端  →  GET /menus    拉取当前用户菜单树   → 渲染侧边栏（页面级可见性）
+前端  →  GET /menus       拉取当前用户菜单树   → 渲染侧边栏（页面级可见性）
          ↓
-       →  GET /profile 拉取当前用户实时角色 → 按钮级显隐
+       →  GET /permissions 拉取当前用户权限码   → 控制按钮显隐（操作级）
          ↓
 路由守卫 → 用菜单树中的 path 白名单判断能否访问该页面（体验层）
          ↓
 后端接口 → auth 中间件：验 JWT 签名 / 有效期 / issuer，并确认账号仍存在
          ↓          → rbac 中间件【实时查库】比对角色白名单 → 401 / 403
+                     → perm 中间件【实时查库】比对权限码白名单 → 403
 ```
+
+> **两级权限，各管各的**：
+> - `rbac(['admin'])` 是**页面级**门槛，管「谁能进这个管理页面 / 用这套功能」；
+> - `perm('sys:user:create')` 是**操作级**门槛，管「谁能执行这个具体动作」。
+>
+> 只用角色粒度太粗 —— 「能看用户列表」和「能删用户」被绑在一起，
+> 想给一个只读账号只能把整个菜单关掉；
+> 只用权限码粒度又没人守页面级门槛。
+> 两级叠加：**rbac 守页面，perm 守操作**。
 
 > **安全边界始终在后端**：前端隐藏按钮与路由拦截只是体验优化，所有写操作接口
 > 由中间件统一兜底，前端校验可被绕过。
@@ -99,8 +111,8 @@
 > **Token 只证明身份，不承载权限**：JWT 的 payload 是 Base64 编码（**不是加密**），
 > 任何人都能解出来看；角色一旦写进 Token 就固化成「登录那一刻的快照」，
 > 管理员降权后旧 Token 仍能带着 `admin` 通行。因此签发时**只放身份**，
-> 角色一律由 `user_id → user_role → role` 实时查询得出。
-> 管理员调整角色后，用户刷新页面即刻生效，无需重新登录。
+> 角色与权限码一律实时查询得出。
+> 管理员调整角色或按钮授权后，用户刷新页面即刻生效，无需重新登录。
 
 ---
 
@@ -143,6 +155,20 @@
     失效逻辑，复杂度上升一个量级。更关键的是，**「权限变更实时生效」正是本系统最有价值的设计点**，
     改成 TTL 缓存会让降权存在生效延迟。若将来量级增长到需要缓存，
     正确做法是「加缓存 + 同时保留主动失效通道」，而不是简单换成 TTL。
+14. **按钮级权限：按钮就是菜单表的一行**：`menu` 表增加 `type`
+    （directory 目录 / menu 菜单 / button 按钮）与 `perm`（权限标识，如 `sys:user:create`）。
+    按钮挂在对应页面菜单下，通过**同一张 `role_menu` 表**授权 —— 所以「授权菜单」和
+    「授权按钮」共用一套数据模型，不需要额外的权限表，也不会出现两套授权逻辑打架。
+    权限标识命名规范统一为「模块:实体:动作」。
+15. **按钮不污染侧边栏**：同一张 `menu` 表承担两种语义，靠 `type` 区分。
+    `GET /menus`（侧边栏数据）在组树前剔除 `type = 'button'` 的节点；
+    `GET /menus/all`（授权页数据）保留它们，管理员才能勾选。
+    前端侧边栏再做一次过滤兜底，双保险。
+16. **细粒度权限与后端强绑定**：`perm` 中间件在 `rbac` 之后执行，同样是**实时查库**，
+    支持通配写法（`sys:user:*`）。前端用 `v-perm` 指令按**同一份权限码**控制按钮显隐，
+    因此不会出现「后端已 403、前端按钮还亮着」的割裂。
+    已验证的细粒度场景：只给普通用户授予 `sys:user:create` 而**不**授予 `sys:user:delete`，
+    该用户能新增、能看列表，但调用删除接口返回 403 —— 这正是角色粒度做不到的事。
 
 ---
 
@@ -153,18 +179,19 @@
 | POST | `/login` | 登录，返回 token | 公开 |
 | POST | `/register` | 注册（角色固定为普通用户，服务端不读 body.role） | 公开 |
 | POST | `/logout` | 登出（JWT 无状态，服务端仅返回成功，由前端清除 token） | 公开 |
-| GET | `/menus` | 当前用户菜单树 | 登录 |
-| GET | `/menus/all` | 全部菜单 | admin |
+| GET | `/menus` | 当前用户菜单树（**不含按钮**） | 登录 |
+| GET | `/menus/all` | 全部菜单（**含按钮**，授权页用） | admin |
 | GET | `/menus/roles` | 角色列表及已授权菜单 ID | admin |
-| PUT | `/menus/roles/:roleId` | 给角色分配菜单（事务） | admin |
-| POST | `/menus` | 新增菜单 | admin |
-| PUT | `/menus/:id` | 修改菜单 | admin |
-| DELETE | `/menus/:id` | 删除菜单（级联子菜单与授权记录） | admin |
+| PUT | `/menus/roles/:roleId` | 给角色分配菜单与按钮（事务） | `sys:role:assign` |
+| POST | `/menus` | 新增菜单 | `sys:menu:create` |
+| PUT | `/menus/:id` | 修改菜单 | `sys:menu:update` |
+| DELETE | `/menus/:id` | 删除菜单（级联子菜单与授权记录） | `sys:menu:delete` |
 | GET | `/users` | 用户列表（分页 / 搜索） | 登录 |
-| POST | `/users` | 新增用户 | admin |
-| PUT | `/users/:id` | 修改用户 | admin |
-| DELETE | `/users/:id` | 删除用户 | admin |
+| POST | `/users` | 新增用户 | `sys:user:create` |
+| PUT | `/users/:id` | 修改用户 | `sys:user:update` |
+| DELETE | `/users/:id` | 删除用户 | `sys:user:delete` |
 | GET | `/profile` | 当前登录账号的实时身份与角色 | 登录 |
+| GET | `/permissions` | 当前登录账号的权限码列表 | 登录 |
 
 在线文档：<http://localhost:3000/swagger>
 
@@ -205,10 +232,20 @@ npm run dev          # nodemon 热重载，端口 3000
 cd Node-Koa/code/server
 node scripts/init-admin.js   # 创建/重置管理员 admin / 123456
 node scripts/init-rbac.js    # 创建角色并绑定管理员
-node scripts/init-menu.js    # 创建菜单树并按角色分配
+node scripts/init-menu.js    # 创建菜单树 + 按钮权限种子，并按角色分配
 ```
 
 三个脚本均为幂等，可重复执行。
+
+> **如果是已存在的旧库**：`sequelize.sync()` 只建表、**不会给已存在的表加字段**，
+> 所以旧库要先跑一次迁移脚本补 `menu.type` / `menu.perm` 两列并写入按钮权限种子：
+>
+> ```bash
+> node scripts/migrate-perm.js
+> ```
+>
+> 该脚本同样幂等（只补 admin 角色缺失的按钮授权，不覆盖人工调整过的结果）；
+> 全新安装直接跑 `init-menu.js` 即可，不需要额外执行迁移。
 
 ### 4. 启动前端
 
@@ -254,13 +291,16 @@ npm run dev          # Vite dev server，端口 5174，/api 已代理到 3000
 
 诚实记录当前尚未覆盖的部分，也是后续迭代方向：
 
-- [ ] **权限粒度**：当前接口鉴权只到「角色能否访问」，无法表达「能看不能改」，需要引入权限码（`user:create`）体系
+- [x] **权限粒度**：已落地按钮级权限码体系（`sys:user:create` / `sys:menu:delete` 等），
+      接口鉴权不再只到「角色能否访问」，可以表达「能看不能改」
+- [ ] **权限码全覆盖**：目前只有用户管理、菜单管理、角色授权三组接口接了权限码，
+      其余写接口仍是「登录即可」，待按同一套规范补齐
 - [ ] **强制失效**：账号被删除后其 Token 已能立即失效（`auth` 中间件实时查账号），
       但 Token 本身在有效期内仍无法主动失效 —— 用户点「退出登录」后，只要 Token 没过期理论上仍可被重放。
       待引入 token 版本号或黑名单
-- [ ] **按钮级权限**：按钮显隐已按实时角色生效，但仍绑定「角色」而非细粒度权限码，角色数量一多需要引入权限码 + `v-permission` 指令解耦
 - [ ] **测试**：已接入 Jest + Supertest，待补齐权限矩阵回归用例
-- [ ] **数据迁移**：当前依赖 `sequelize.sync()` 建表，待引入迁移脚本管理表结构演进
+- [x] **数据迁移**：已引入 `scripts/migrate-perm.js` 管理表结构演进（补列 + 种子数据），
+      后续字段变更按同一模式追加
 - [ ] **操作审计**：权限变更等高危动作尚未落审计日志
 - [ ] **数据聚合层**：首页看板数据目前为前端静态数据，计划下沉为后端聚合接口
 

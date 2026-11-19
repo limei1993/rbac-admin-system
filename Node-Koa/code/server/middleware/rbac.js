@@ -1,12 +1,11 @@
 const { fail } = require('../utils/response')
-const Role = require('../models/role')
-const UserRole = require('../models/userRole')
+const { getUserRoleNames } = require('../utils/permissions')
 
 /**
- * 权限校验（RBAC）中间件
+ * 权限校验（RBAC）中间件 —— 角色级门槛
  *
  * 用法：
- *   router.delete('/:id', auth, rbac(['admin']), User.remove)
+ *   router.get('/all', auth, rbac(['admin']), Menu.getAllMenus)
  *
  * 前提：必须放在 auth 中间件之后，
  *      因为用户身份是 auth 从 JWT 里解析出来挂在 ctx.state.user 上的
@@ -19,6 +18,11 @@ const UserRole = require('../models/userRole')
  *     和菜单模块（controller/menu.js）保持同一套口径：
  *     管理员改完权限，用户刷新页面立刻生效，不用等 token 过期
  *   - 一个用户可以有多个角色，这里取并集（命中任意一个允许的角色即放行）
+ *
+ * 与 perm 中间件的分工（两级权限）：
+ *   rbac(['admin']) 管「谁能进这个管理页面」，
+ *   perm('sys:user:create') 管「谁能执行这个具体操作」。
+ *   只用角色粒度太粗，只用权限码又没人守页面级门槛。
  *
  * @param {Array} allowedRoles 允许访问的角色列表，比如 ['admin']
  */
@@ -34,12 +38,7 @@ const rbac = (allowedRoles) => {
         // 2. 实时查这个用户当前拥有的角色
         let roleNames = []
         try {
-            const links = await UserRole.findAll({ where: { userId: user.id } })
-            const roleIds = links.map(l => l.roleId)
-            if (roleIds.length) {
-                const roles = await Role.findAll({ where: { id: roleIds } })
-                roleNames = roles.map(r => r.name)
-            }
+            roleNames = await getUserRoleNames(user.id)
         } catch (err) {
             // 查库失败必须「拒绝」而不是「放行」（fail closed）：
             // 权限校验属于安全边界，宁可报错也不能降级放行

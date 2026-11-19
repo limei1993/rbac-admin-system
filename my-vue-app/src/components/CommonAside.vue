@@ -31,7 +31,7 @@
         菜单树由后端 /menus 接口按当前用户的角色下发，
         这里用递归组件渲染，层级多少都能显示
       -->
-      <MenuItem v-for="item in menuStore.menus" :key="item.id" :item="item" />
+      <MenuItem v-for="item in pageMenus" :key="item.id" :item="item" />
     </el-menu>
   </el-aside>
 </template>
@@ -53,6 +53,13 @@ const menuStore = useMenuStore()
 
 const collapse = computed(() => store.state.isCollapse)
 const width = computed(() => (collapse.value ? '64px' : '180px'))
+
+// 侧边栏只渲染「页面级」菜单。
+// 按钮（type = 'button'）只是权限载体，不对应任何路由，不能出现在导航里 ——
+// 后端 GET /menus 已经过滤过一次，这里是前端兜底。
+const pageMenus = computed(() =>
+  (menuStore.menus || []).filter((item) => item.type !== 'button')
+)
 
 // 首次进入后台时拉一次菜单（路由守卫里也会拉，这里兜底，保证侧边栏一定有数据）
 onMounted(() => {

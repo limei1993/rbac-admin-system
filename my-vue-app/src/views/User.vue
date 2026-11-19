@@ -8,11 +8,11 @@
       </template>
 
       <!-- 操作栏：新增 + 搜索 -->
-      <!-- 新增 / 编辑 / 删除都是管理员专属操作：
+      <!-- 新增 / 编辑 / 删除按【权限码】控制显隐（v-perm 指令）：
            前端隐藏按钮只是展示层优化，
-           真正的权限边界在后端 rbac 中间件，普通用户直接调接口会返回 403 -->
+           真正的权限边界在后端 perm 中间件，普通用户直接调接口会返回 403 -->
       <div class="toolbar">
-        <el-button v-if="userStore.isAdmin" type="primary" :icon="Plus" @click="openAdd">新增</el-button>
+        <el-button v-perm="'sys:user:create'" type="primary" :icon="Plus" @click="openAdd">新增</el-button>
         <div class="search">
           <el-input
             v-model="searchName"
@@ -36,10 +36,10 @@
         <el-table-column prop="addr" label="地址" min-width="220" />
         <el-table-column label="操作" width="180" fixed="right">
           <template #default="{ row }">
-            <el-button v-if="userStore.isAdmin" link type="primary" @click="openEdit(row)">编辑</el-button>
-            <!-- 删除是管理员专属操作：前端隐藏按钮只是展示层优化，
-                 真正的权限边界在后端 rbac 中间件，普通用户直接调接口会返回 403 -->
-            <el-button v-if="userStore.isAdmin" link type="danger" @click="handleDelete(row)">删除</el-button>
+            <el-button v-perm="'sys:user:update'" link type="primary" @click="openEdit(row)">编辑</el-button>
+            <!-- 删除按权限码控制显隐：后端对应 perm('sys:user:delete')，
+                 绕过前端直接调接口会返回 403 -->
+            <el-button v-perm="'sys:user:delete'" link type="danger" @click="handleDelete(row)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -99,10 +99,10 @@ import { ref, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Search } from '@element-plus/icons-vue'
 import { getUsers, addUser, updateUser, deleteUser } from '@/api/user'
-import { useUserStore } from '@/stores'
 
-// 登录态：用于按角色控制按钮的显示（真正的权限校验在后端）
-const userStore = useUserStore()
+// 注意：这里不再引入 useUserStore ——
+// 按钮显隐改由 v-perm 指令按【权限码】控制，
+// 指令内部会去 store 里取权限码，页面自己不需要再关心角色。
 
 // ============ 分页 / 搜索状态 ============
 const currentPage = ref(1)

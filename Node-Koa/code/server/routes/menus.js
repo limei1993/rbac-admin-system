@@ -11,6 +11,7 @@ const {
 } = require('../controller/menu')
 const auth = require('../utils/auth')
 const rbac = require('../middleware/rbac')
+const perm = require('../middleware/perm')
 const validate = require('../middleware/validate')
 
 // 1. 定义【分配菜单】的校验规则
@@ -31,15 +32,23 @@ const createSchema = Joi.object({
         'string.empty': '菜单名称不能为空',
         'any.required': '必须传入菜单名称'
     }),
-    // 路径必须以 / 开头，因为前端是 hash 路由，菜单点击后直接 push 这个 path
-    path: Joi.string().trim().pattern(/^\//).max(100).required().messages({
-        'string.pattern.base': '菜单路径必须以 / 开头',
-        'any.required': '必须传入菜单路径'
+    // 路径：按钮类型不需要路径（它不对应页面，只承载权限码），
+    // 所以这里统一允许空串，由 controller 按 type 再做必填与格式校验
+    path: Joi.string().trim().max(100).allow('').default('').messages({
+        'string.max': '菜单路径不能超过 100 个字符'
     }),
     icon: Joi.string().trim().max(100).allow('').default(''),
     parentId: Joi.number().integer().min(0).default(0),
     sort: Joi.number().integer().default(0),
-    visible: Joi.boolean().default(true)
+    visible: Joi.boolean().default(true),
+    // 菜单类型：directory(目录) / menu(菜单) / button(按钮)
+    type: Joi.string().valid('directory', 'menu', 'button').default('menu').messages({
+        'any.only': '菜单类型只能是 directory / menu / button'
+    }),
+    // 权限标识，格式「模块:实体:动作」，例如 sys:user:create
+    perm: Joi.string().trim().max(100).allow('').default('').messages({
+        'string.max': '权限标识不能超过 100 个字符'
+    })
 })
 
 // 3. 定义【修改菜单】的校验规则（全部可选，允许只改其中一项）
@@ -47,13 +56,19 @@ const updateSchema = Joi.object({
     name: Joi.string().trim().min(1).max(50).optional().messages({
         'string.empty': '菜单名称不能为空'
     }),
-    path: Joi.string().trim().pattern(/^\//).max(100).optional().messages({
-        'string.pattern.base': '菜单路径必须以 / 开头'
+    path: Joi.string().trim().max(100).allow('').optional().messages({
+        'string.max': '菜单路径不能超过 100 个字符'
     }),
     icon: Joi.string().trim().max(100).allow('').optional(),
     parentId: Joi.number().integer().min(0).optional(),
     sort: Joi.number().integer().optional(),
-    visible: Joi.boolean().optional()
+    visible: Joi.boolean().optional(),
+    type: Joi.string().valid('directory', 'menu', 'button').optional().messages({
+        'any.only': '菜单类型只能是 directory / menu / button'
+    }),
+    perm: Joi.string().trim().max(100).allow('').optional().messages({
+        'string.max': '权限标识不能超过 100 个字符'
+    })
 })
 
 router.prefix('/menus')
@@ -124,7 +139,7 @@ router.get('/roles', auth, rbac(['admin']), getRoles)
  *       200:
  *         description: 分配成功
  */
-router.put('/roles/:roleId', auth, rbac(['admin']), validate(assignSchema), assignMenus)
+router.put('/roles/:roleId', auth, perm('sys:role:assign'), validate(assignSchema), assignMenus)
 
 /**
  * @swagger
@@ -162,7 +177,7 @@ router.put('/roles/:roleId', auth, rbac(['admin']), validate(assignSchema), assi
  *       200:
  *         description: 成功
  */
-router.post('/', auth, rbac(['admin']), validate(createSchema), createMenu)
+router.post('/', auth, perm('sys:menu:create'), validate(createSchema), createMenu)
 
 /**
  * @swagger
@@ -194,7 +209,7 @@ router.post('/', auth, rbac(['admin']), validate(createSchema), createMenu)
  *       200:
  *         description: 成功
  */
-router.put('/:id', auth, rbac(['admin']), validate(updateSchema), updateMenu)
+router.put('/:id', auth, perm('sys:menu:update'), validate(updateSchema), updateMenu)
 
 /**
  * @swagger
@@ -213,6 +228,6 @@ router.put('/:id', auth, rbac(['admin']), validate(updateSchema), updateMenu)
  *       200:
  *         description: 成功
  */
-router.delete('/:id', auth, rbac(['admin']), deleteMenu)
+router.delete('/:id', auth, perm('sys:menu:delete'), deleteMenu)
 
 module.exports = router

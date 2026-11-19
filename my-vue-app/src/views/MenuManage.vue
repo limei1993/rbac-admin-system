@@ -36,18 +36,37 @@
           </template>
         </el-table-column>
 
-        <el-table-column prop="path" label="菜单路径" min-width="200">
+        <el-table-column label="类型" width="90" align="center">
           <template #default="{ row }">
-            <span :class="{ 'path-invalid': !isValidPath(row.path) }">
-              {{ row.path }}
-            </span>
-            <el-tooltip
-              v-if="!isValidPath(row.path)"
-              content="这个路径在前端路由表里不存在，点击菜单会进入空白页，建议重新选择"
-              placement="top"
-            >
-              <el-icon class="warn-icon"><WarningFilled /></el-icon>
-            </el-tooltip>
+            <el-tag v-if="row.type === 'button'" type="warning" size="small">按钮</el-tag>
+            <el-tag v-else-if="row.type === 'directory'" type="info" size="small">目录</el-tag>
+            <el-tag v-else type="primary" size="small">菜单</el-tag>
+          </template>
+        </el-table-column>
+
+        <el-table-column prop="path" label="菜单路径" min-width="180">
+          <template #default="{ row }">
+            <!-- 按钮不对应页面，没有路径 -->
+            <span v-if="row.type === 'button'" class="perm-empty">—</span>
+            <template v-else>
+              <span :class="{ 'path-invalid': !isValidPath(row.path) }">
+                {{ row.path }}
+              </span>
+              <el-tooltip
+                v-if="!isValidPath(row.path)"
+                content="这个路径在前端路由表里不存在，点击菜单会进入空白页，建议重新选择"
+                placement="top"
+              >
+                <el-icon class="warn-icon"><WarningFilled /></el-icon>
+              </el-tooltip>
+            </template>
+          </template>
+        </el-table-column>
+
+        <el-table-column prop="perm" label="权限标识" min-width="170">
+          <template #default="{ row }">
+            <code v-if="row.perm" class="perm-code">{{ row.perm }}</code>
+            <span v-else class="perm-empty">—</span>
           </template>
         </el-table-column>
 
@@ -67,9 +86,10 @@
 
         <el-table-column label="操作" width="230" fixed="right">
           <template #default="{ row }">
-            <el-button link type="primary" @click="openAdd(row)">新增子级</el-button>
-            <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
-            <el-button link type="danger" @click="handleDelete(row)">删除</el-button>
+            <!-- 按钮是权限载体，不能再有子级 -->
+            <el-button v-if="row.type !== 'button'" v-perm="'sys:menu:create'" link type="primary" @click="openAdd(row)">新增子级</el-button>
+            <el-button v-perm="'sys:menu:update'" link type="primary" @click="openEdit(row)">编辑</el-button>
+            <el-button v-perm="'sys:menu:delete'" link type="danger" @click="handleDelete(row)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -102,7 +122,18 @@
           <el-input v-model="form.name" placeholder="例如：订单管理" />
         </el-form-item>
 
-        <el-form-item label="菜单路径" prop="path">
+        <el-form-item label="菜单类型" prop="type">
+          <el-radio-group v-model="form.type">
+            <el-radio-button label="menu">菜单</el-radio-button>
+            <el-radio-button label="directory">目录</el-radio-button>
+            <el-radio-button label="button">按钮</el-radio-button>
+          </el-radio-group>
+          <div class="form-tip">
+            菜单 = 对应一个前端页面；目录 = 只做分组；按钮 = 不对应页面，只承载一个权限标识
+          </div>
+        </el-form-item>
+
+        <el-form-item v-if="form.type !== 'button'" label="菜单路径" prop="path">
           <el-select
             v-model="form.path"
             filterable
@@ -118,6 +149,18 @@
           </el-select>
           <div class="form-tip">
             只能选择前端路由表里已存在的路径，否则点菜单会进空白页
+          </div>
+        </el-form-item>
+
+        <el-form-item v-else label="菜单路径">
+          <el-input disabled placeholder="按钮不对应页面，无需填写路径" />
+        </el-form-item>
+
+        <el-form-item v-if="form.type === 'button'" label="权限标识" prop="perm">
+          <el-input v-model="form.perm" placeholder="例如：sys:user:create" />
+          <div class="form-tip">
+            命名规范「模块:实体:动作」。后端按它鉴权（perm 中间件），
+            前端用 v-perm 指令控制按钮显隐，两端用的是同一份数据
           </div>
         </el-form-item>
 
@@ -227,15 +270,26 @@ const form = ref({
   path: '',
   icon: '',
   sort: 0,
-  visible: true
+  visible: true,
+  type: 'menu',
+  perm: ''
 })
 
 const dialogTitle = computed(() => (isEdit.value ? '编辑菜单' : '新增菜单'))
 
-const rules = {
+// 校验规则跟着「菜单类型」走：
+//   按钮不需要路径，但必须有权限标识；其余类型相反
+const rules = computed(() => ({
   name: [{ required: true, message: '请输入菜单名称', trigger: 'blur' }],
-  path: [{ required: true, message: '请选择菜单路径', trigger: 'change' }]
-}
+  path:
+    form.value.type === 'button'
+      ? []
+      : [{ required: true, message: '请选择菜单路径', trigger: 'change' }],
+  perm:
+    form.value.type === 'button'
+      ? [{ required: true, message: '请输入权限标识', trigger: 'blur' }]
+      : []
+}))
 
 /**
  * 上级菜单候选项
@@ -264,9 +318,10 @@ const parentOptions = computed(() => {
   findSelf(menus.value)
 
   // 过滤掉被排除的节点，并去掉空的 children（否则树选择器会显示成"有子节点"）
+  // 按钮不能作为父级 —— 它只是权限载体，不是容器
   const filter = (list) =>
     list
-      .filter((item) => !banned.has(item.id))
+      .filter((item) => !banned.has(item.id) && item.type !== 'button')
       .map((item) => {
         const copy = { ...item }
         const children = filter(item.children || [])
@@ -291,7 +346,10 @@ const openAdd = (parent) => {
     path: '',
     icon: '',
     sort: 0,
-    visible: true
+    visible: true,
+    // 新增子级时默认是菜单类型（按钮不能有子级）
+    type: 'menu',
+    perm: ''
   }
   dialogVisible.value = true
 }
@@ -306,7 +364,9 @@ const openEdit = (row) => {
     path: row.path,
     icon: row.icon || '',
     sort: row.sort,
-    visible: row.visible
+    visible: row.visible,
+    type: row.type || 'menu',
+    perm: row.perm || ''
   }
   dialogVisible.value = true
 }
@@ -317,12 +377,15 @@ const submit = () => {
 
     const payload = {
       name: form.value.name.trim(),
-      path: form.value.path,
+      // 按钮不对应页面，路径固定为空
+      path: form.value.type === 'button' ? '' : form.value.path,
       icon: form.value.icon || '',
       // 上级没选 = 顶级菜单
       parentId: form.value.parentId || 0,
       sort: form.value.sort || 0,
-      visible: form.value.visible
+      visible: form.value.visible,
+      type: form.value.type,
+      perm: form.value.type === 'button' ? form.value.perm.trim() : ''
     }
 
     saving.value = true
@@ -414,6 +477,19 @@ const handleDelete = (row) => {
   margin-left: 4px;
   color: #e6a23c;
   vertical-align: middle;
+}
+
+.perm-code {
+  padding: 2px 6px;
+  border-radius: 3px;
+  background-color: #fdf6ec;
+  color: #b88230;
+  font-family: Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+
+.perm-empty {
+  color: #c0c4cc;
 }
 
 .form-tip {

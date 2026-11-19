@@ -2,6 +2,8 @@ const sequelize = require('../config/db')
 const Menu = require('../models/menu')
 const Role = require('../models/role')
 const RoleMenu = require('../models/roleMenu')
+const { ensurePermColumns } = require('./ensure-perm-columns')
+const { BUTTON_DEFS } = require('./perm-defs')
 
 /**
  * 初始化菜单数据 + 角色菜单授权
@@ -20,24 +22,24 @@ const RoleMenu = require('../models/roleMenu')
  * path 和前端 router/index.js 里的静态路由保持一一对应
  */
 const MENU_TREE = [
-    { name: '首页',     path: '/', icon: 'HomeFilled',   sort: 1, children: [] },
-    { name: '商品管理', path: '/goods',              icon: 'Goods',        sort: 2, children: [] },
-    { name: '用户管理', path: '/user',               icon: 'User',         sort: 3, children: [] },
+    { name: '首页',     path: '/', icon: 'HomeFilled',   sort: 1, type: 'menu', children: [] },
+    { name: '商品管理', path: '/goods',              icon: 'Goods',        sort: 2, type: 'menu', children: [] },
+    { name: '用户管理', path: '/user',               icon: 'User',         sort: 3, type: 'menu', children: [] },
     {
-        name: '其他', path: '/other', icon: 'Grid', sort: 4,
+        name: '其他', path: '/other', icon: 'Grid', sort: 4, type: 'menu',
         children: [
-            { name: '商品列表', path: '/other/goods-list',    icon: 'List',         sort: 1, children: [] },
-            { name: '分类展示', path: '/other/category-list', icon: 'FolderOpened', sort: 2, children: [] }
+            { name: '商品列表', path: '/other/goods-list',    icon: 'List',         sort: 1, type: 'menu', children: [] },
+            { name: '分类展示', path: '/other/category-list', icon: 'FolderOpened', sort: 2, type: 'menu', children: [] }
         ]
     },
     {
         // 角色菜单授权页（前端路由 /menu-auth）
         // 只给 admin 角色：下面 ROLE_MENUS 里 user 角色没有勾它
-        name: '角色授权', path: '/menu-auth', icon: 'Lock', sort: 5, children: []
+        name: '角色授权', path: '/menu-auth', icon: 'Lock', sort: 5, type: 'menu', children: []
     },
     {
         // 菜单管理页（前端路由 /menu-manage）：增删改菜单表本身
-        name: '菜单管理', path: '/menu-manage', icon: 'Menu', sort: 6, children: []
+        name: '菜单管理', path: '/menu-manage', icon: 'Menu', sort: 6, type: 'menu', children: []
     }
 ]
 
@@ -54,7 +56,9 @@ const ROLE_MENUS = {
 const run = async () => {
     // 1. 确保表结构是最新的（menu / role_menu 是新表，第一次执行会建出来）
     await sequelize.sync()
-    console.log('数据表已就绪')
+    // sync 只建新表、不给已存在的表加字段，所以这里补一次列检查
+    const added = await ensurePermColumns(sequelize)
+    console.log(added.length ? `已新增字段：${added.join(', ')}` : '数据表已就绪')
 
     const transaction = await sequelize.transaction()
 
@@ -74,7 +78,9 @@ const run = async () => {
                         icon: node.icon,
                         parentId,
                         sort: node.sort,
-                        visible: true
+                        visible: true,
+                        type: node.type || 'menu',
+                        perm: node.perm || ''
                     },
                     transaction
                 })
@@ -89,6 +95,43 @@ const run = async () => {
         }
 
         await createMenus(MENU_TREE, 0)
+
+        // 2.5 创建「按钮」级权限
+        //     按钮在数据上就是 menu 表的行：type = 'button'，
+        //     挂在对应页面菜单下，path 为空（不占路由），只承载一个权限标识。
+        //     这样「授权菜单」和「授权按钮」用的是同一张 role_menu 表。
+        for (const def of BUTTON_DEFS) {
+            const parent = await Menu.findOne({
+                where: { name: def.parentName, parentId: 0 },
+                transaction
+            })
+            if (!parent) {
+                console.warn(`跳过按钮「${def.name}」：找不到父菜单「${def.parentName}」`)
+                continue
+            }
+
+            const [row, isNew] = await Menu.findOrCreate({
+                where: { name: def.name, parentId: parent.id },
+                defaults: {
+                    name: def.name,
+                    path: '',
+                    icon: '',
+                    parentId: parent.id,
+                    sort: def.sort,
+                    visible: true,
+                    type: 'button',
+                    perm: def.perm
+                },
+                transaction
+            })
+
+            // 已存在的记录：如果类型或权限码被人工改过，纠正回来
+            if (!isNew && (row.type !== 'button' || row.perm !== def.perm)) {
+                await row.update({ type: 'button', perm: def.perm }, { transaction })
+            }
+
+            console.log(`按钮就绪：${def.parentName} / ${def.name} (${def.perm}, id=${row.id})`)
+        }
 
         // 3. 按角色分配菜单
         for (const [roleName, want] of Object.entries(ROLE_MENUS)) {

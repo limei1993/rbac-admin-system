@@ -27,7 +27,15 @@ const menu = sequelize.define('menu', {
   // 排序，数字小的排前面
   sort: { type: DataTypes.INTEGER, defaultValue: 0, allowNull: false },
   // 0 = 隐藏。隐藏是"整棵子树一起隐藏"，不是只藏自己
-  visible: { type: DataTypes.BOOLEAN, defaultValue: true, allowNull: false }
+  visible: { type: DataTypes.BOOLEAN, defaultValue: true, allowNull: false },
+  // 菜单类型：directory(目录) / menu(菜单) / button(按钮)
+  //   - directory：只做分组，path 可为空，侧边栏渲染成不可点击的标题
+  //   - menu     ：对应一个前端路由，path 必填
+  //   - button   ：不对应页面，只承载一个权限码（见 perm 字段），不出现在侧边栏
+  type: { type: DataTypes.STRING(20), defaultValue: 'menu', allowNull: false },
+  // 权限标识，格式「模块:实体:动作」，例如 sys:user:create
+  // 只有 type = button 时才有意义；后端按它做细粒度鉴权，前端按它控制按钮显隐
+  perm: { type: DataTypes.STRING(100), defaultValue: '', allowNull: false }
 }, {
   // 冻结表名
   freezeTableName: true,

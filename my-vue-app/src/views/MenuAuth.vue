@@ -5,9 +5,10 @@
         <div class="card-header">
           <span class="title">角色菜单授权</span>
           <span class="desc">
-            勾选菜单并保存后，该角色重新登录即可看到这些菜单。
+            勾选菜单与按钮权限并保存后，该角色刷新页面即可看到对应菜单、获得对应操作权限。
             <br />
-            说明：子菜单被勾选时，服务端会自动把它所在的父菜单一起授权，保证菜单树完整。
+            说明：子项被勾选时，服务端会自动把它所在的父级一起授权，保证菜单树完整；
+            按钮只控制操作权限（新增 / 编辑 / 删除等），不会出现在侧边栏。
           </span>
         </div>
       </template>
@@ -48,14 +49,30 @@
               :props="{ label: 'name', children: 'children' }"
               :default-expanded-keys="expandedKeys"
               class="menu-tree"
-            />
+            >
+              <!-- 自定义节点：标出类型，并把权限标识显示出来 -->
+              <template #default="{ data }">
+                <span class="tree-node">
+                  <span class="node-name">{{ data.name }}</span>
+                  <el-tag v-if="data.type === 'button'" type="warning" size="small">按钮</el-tag>
+                  <el-tag v-else-if="data.type === 'directory'" type="info" size="small">目录</el-tag>
+                  <code v-if="data.perm" class="perm-code">{{ data.perm }}</code>
+                </span>
+              </template>
+            </el-tree>
           </div>
 
           <div class="actions">
             <el-button size="small" @click="handleCheckAll">全选</el-button>
             <el-button size="small" @click="handleClear">清空</el-button>
             <el-button size="small" @click="handleRefresh">刷新</el-button>
-            <el-button type="primary" size="small" :loading="saving" @click="handleSave">
+            <el-button
+              v-perm="'sys:role:assign'"
+              type="primary"
+              size="small"
+              :loading="saving"
+              @click="handleSave"
+            >
               保存
             </el-button>
           </div>
@@ -179,7 +196,7 @@ const handleSave = async () => {
     const savedIds = res.data?.menuIds || menuIds
     treeRef.value?.setCheckedKeys(savedIds)
 
-    ElMessage.success('保存成功，该角色刷新页面后即可看到新菜单')
+    ElMessage.success('保存成功，该角色刷新页面后即可看到新菜单、获得对应操作权限')
 
     // 重新拉一次角色列表，刷新「已授权 N 项」的计数
     const roleRes = await getRoleMenus()
@@ -278,5 +295,24 @@ onMounted(loadData)
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+}
+
+.tree-node {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+
+  .node-name {
+    font-size: 13px;
+  }
+}
+
+.perm-code {
+  padding: 1px 5px;
+  border-radius: 3px;
+  background-color: #fdf6ec;
+  color: #b88230;
+  font-family: Menlo, Consolas, monospace;
+  font-size: 12px;
 }
 </style>

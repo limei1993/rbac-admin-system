@@ -33,6 +33,8 @@ const buildTree = (list) => {
             icon: item.icon,
             sort: item.sort,
             visible: item.visible,
+            type: item.type || 'menu',
+            perm: item.perm || '',
             children: []
         })
     })
@@ -158,7 +160,9 @@ const toPlain = (menu) => ({
     path: menu.path,
     icon: menu.icon || '',
     sort: menu.sort,
-    visible: menu.visible
+    visible: menu.visible,
+    type: menu.type || 'menu',
+    perm: menu.perm || ''
 })
 
 /**
@@ -259,8 +263,12 @@ const getUserMenus = async (ctx) => {
     // 4. 补齐没被授权的父菜单
     const full = await withAncestors(menus)
 
-    // 5. 组装成树返回
-    success(ctx, toTree(full))
+    // 5. 剔除「按钮」类型：按钮只承载权限码，不该出现在侧边栏。
+    //    按钮的权限码由 GET /permissions 单独下发，前端据此控制按钮显隐。
+    const pageMenus = full.filter(m => m.type !== 'button')
+
+    // 6. 组装成树返回
+    success(ctx, toTree(pageMenus))
 }
 
 /**
@@ -320,7 +328,21 @@ const assignMenus = async (ctx) => {
         throw new AppError('角色不存在', 404, 10002)
     }
 
-    // 2. 勾选了子菜单就把父菜单一起补上，避免出现「有子没父」的孤儿菜单
+    // 2. 校验 menuIds 确实存在
+    //    防止前端传了脏数据，导致 role_menu 里出现指向不存在菜单的孤儿授权记录
+    const numericIds = menuIds.map(Number).filter(id => Number.isInteger(id))
+    const validRows = await Menu.findAll({
+        where: { id: { [Op.in]: numericIds } },
+        attributes: ['id']
+    })
+    const validIds = new Set(validRows.map(r => r.id))
+    const invalidIds = numericIds.filter(id => !validIds.has(id))
+    if (invalidIds.length) {
+        throw new AppError(`菜单不存在：${invalidIds.join(', ')}`, 400, 10003)
+    }
+
+    // 3. 勾选了子菜单就把父菜单一起补上，避免出现「有子没父」的孤儿菜单
+    //    （勾了按钮也会把它的父菜单补上 —— 按钮本来就该挂在某个菜单下）
     const finalIds = await collectWithAncestors(menuIds)
 
     // 3. 事务里先删后插，保证授权数据一致
@@ -355,13 +377,39 @@ const assignMenus = async (ctx) => {
  *   菜单新增 = 决定「菜单表里有哪些菜单」本身
  */
 const createMenu = async (ctx) => {
-    const { name, path, icon, parentId, sort, visible } = ctx.request.body
+    const { name, path, icon, parentId, sort, visible, type, perm } = ctx.request.body
+    const menuType = type || 'menu'
+    const permCode = (perm || '').trim()
 
-    // 1. 路径必须唯一
-    //    前端路由守卫是用 path 判断权限的，同一个 path 出现两次会有歧义
-    const same = await Menu.findOne({ where: { path } })
-    if (same) {
-        throw new AppError(`菜单路径「${path}」已存在`, 400, 10003)
+    // 0. 类型相关的必填校验
+    //    按钮不需要路径（它不对应页面，只承载权限码）
+    //    目录和菜单必须有路径，且必须以 / 开头（前端是 hash 路由）
+    if (menuType !== 'button') {
+        if (!path) {
+            throw new AppError('菜单路径不能为空', 400, 10003)
+        }
+        if (!path.startsWith('/')) {
+            throw new AppError('菜单路径必须以 / 开头', 400, 10003)
+        }
+    }
+
+    // 1. 唯一性校验（按类型分别处理）
+    //    - 按钮：path 为空（不占路由），改用权限标识做唯一约束
+    //    - 目录 / 菜单：path 必须唯一
+    //      （前端路由守卫靠 path 判断权限，同一个 path 出现两次会有歧义）
+    if (menuType === 'button') {
+        if (!permCode) {
+            throw new AppError('按钮类型必须填写权限标识', 400, 10003)
+        }
+        const samePerm = await Menu.findOne({ where: { perm: permCode } })
+        if (samePerm) {
+            throw new AppError(`权限标识「${permCode}」已存在`, 400, 10003)
+        }
+    } else if (path) {
+        const same = await Menu.findOne({ where: { path } })
+        if (same) {
+            throw new AppError(`菜单路径「${path}」已存在`, 400, 10003)
+        }
     }
 
     // 2. 上级菜单是否合法
@@ -369,11 +417,14 @@ const createMenu = async (ctx) => {
 
     const menu = await Menu.create({
         name,
-        path,
+        // 按钮不占路由，path 固定存空串（而不是 null，避免唯一索引上的 NULL 语义问题）
+        path: menuType === 'button' ? '' : (path || ''),
         icon: icon || '',
         parentId: parentId || 0,
         sort: typeof sort === 'number' ? sort : 0,
-        visible: visible === undefined ? true : visible
+        visible: visible === undefined ? true : visible,
+        type: menuType,
+        perm: permCode
     })
 
     success(ctx, toPlain(menu), '菜单创建成功')
@@ -394,10 +445,24 @@ const updateMenu = async (ctx) => {
         throw new AppError('菜单不存在', 404, 10002)
     }
 
-    const { name, path, icon, parentId, sort, visible } = ctx.request.body
+    const { name, path, icon, parentId, sort, visible, type, perm } = ctx.request.body
 
-    // 1. 路径唯一（排除自己）
-    if (path && path !== menu.path) {
+    // 1. 唯一性校验（排除自己）
+    //    按钮走权限标识唯一，其余走路径唯一
+    const nextType = type || menu.type || 'menu'
+    const nextPerm = perm === undefined ? menu.perm : perm.trim()
+
+    if (nextType === 'button') {
+        if (!nextPerm) {
+            throw new AppError('按钮类型必须填写权限标识', 400, 10003)
+        }
+        if (nextPerm !== menu.perm) {
+            const samePerm = await Menu.findOne({ where: { perm: nextPerm } })
+            if (samePerm) {
+                throw new AppError(`权限标识「${nextPerm}」已存在`, 400, 10003)
+            }
+        }
+    } else if (path && path !== menu.path) {
         const same = await Menu.findOne({ where: { path } })
         if (same) {
             throw new AppError(`菜单路径「${path}」已存在`, 400, 10003)
@@ -412,11 +477,13 @@ const updateMenu = async (ctx) => {
     // 3. 只更新真正传了的字段
     const patch = {}
     if (name !== undefined) patch.name = name
-    if (path !== undefined) patch.path = path
+    if (path !== undefined) patch.path = nextType === 'button' ? '' : path
     if (icon !== undefined) patch.icon = icon
     if (parentId !== undefined) patch.parentId = parentId
     if (sort !== undefined) patch.sort = sort
     if (visible !== undefined) patch.visible = visible
+    if (type !== undefined) patch.type = type
+    if (perm !== undefined) patch.perm = nextPerm
 
     await menu.update(patch)
 

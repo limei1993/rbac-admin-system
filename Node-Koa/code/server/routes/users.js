@@ -4,6 +4,7 @@ const auth = require('../utils/auth')
 const validate = require('../middleware/validate') // 引入刚才写的中间件
 const Joi = require('joi') // 引入 Joi
 const rbac = require('../middleware/rbac')
+const perm = require('../middleware/perm')
 
 // 1. 定义【新增用户】的校验规则
 const createSchema = Joi.object({
@@ -69,9 +70,9 @@ router.get('/', auth, User.listAll)
 //   - rbac 中间件放在 validate 之前，先鉴权再校验参数，
 //     避免无权限的人通过参数报错信息探测接口细节
 //   - rbac 内部实时查库，管理员把用户降权后，旧 token 立刻失去写权限
-router.post('/', auth, rbac(['admin']), validate(createSchema), User.create)
+router.post('/', auth, perm('sys:user:create'), validate(createSchema), User.create)
 // 注意这里变成了 /:id，说明 id 是路径的一部分
-router.put('/:id', auth, rbac(['admin']), validate(updateSchema), User.update)
-router.delete('/:id', auth, rbac(['admin']), User.remove)
+router.put('/:id', auth, perm('sys:user:update'), validate(updateSchema), User.update)
+router.delete('/:id', auth, perm('sys:user:delete'), User.remove)
 
 module.exports = router
